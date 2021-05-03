@@ -1,0 +1,214 @@
+---
+author: "Eleanor Fewings"
+output: html_document
+---
+
+# start_section  
+```{r start_section}
+
+# Time stamp
+Sys.time()
+
+# Clean up
+rm(list=ls())
+
+# Load libraries
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(magrittr)
+library(Seurat)
+library(stringr)
+library(progeny)
+library(tibble)
+library(pheatmap)
+
+# Folders
+setwd("~/Saez/CovidEpiMap/")
+
+```
+
+## Load data
+```{r load}
+
+#Load data
+data <- readRDS("integrated.RNA.Tcells.annotated.rds")
+
+#Separate metadata for exploration
+metadata <- data@meta.data
+
+runprog <- function(x){
+
+#Create dataframe of clusters
+CellsClusters <- data.frame(Cell = names(Idents(x)),
+    CellType = as.character(Idents(x)),
+    stringsAsFactors = FALSE)
+
+#Run progeny
+x <- progeny(x, scale=FALSE, organism="Human", top=500, perm=1,
+    return_assay = TRUE)
+
+## We can now directly apply Seurat functions in our Progeny scores. 
+## For instance, we scale the pathway activity scores. 
+x <- Seurat::ScaleData(x, assay = "progeny")
+
+## We transform Progeny scores into a data frame to better handling the results
+progeny_scores_df <-
+    as.data.frame(t(GetAssayData(x, slot = "scale.data",
+        assay = "progeny"))) %>%
+    rownames_to_column("Cell") %>%
+    gather(Pathway, Activity, -Cell)
+
+## We match Progeny scores with the cell clusters.
+progeny_scores_df <- inner_join(progeny_scores_df, CellsClusters)
+
+## We summarize the Progeny scores by cellpopulation
+summarized_progeny_scores <- progeny_scores_df %>%
+    group_by(Pathway, CellType) %>%
+    summarise(avg = mean(Activity), std = sd(Activity))
+
+#Create dataframe for plotting
+summarized_progeny_scores_df <- summarized_progeny_scores %>%
+    dplyr::select(-std) %>%
+    spread(Pathway, avg) %>%
+    data.frame(row.names = 1, check.names = FALSE, stringsAsFactors = FALSE)
+paletteLength = 100
+myColor = colorRampPalette(c("Darkblue", "white","red"))(paletteLength)
+
+progenyBreaks = c(seq(min(summarized_progeny_scores_df), 0,
+                      length.out=ceiling(paletteLength/2) + 1),
+                  seq(max(summarized_progeny_scores_df)/paletteLength,
+                      max(summarized_progeny_scores_df),
+                      length.out=floor(paletteLength/2)))
+
+progeny_hmap = pheatmap(t(summarized_progeny_scores_df[,-1]),fontsize=14,
+                        fontsize_row = 10,
+                        color=myColor, breaks = progenyBreaks,
+                        main = "PROGENy (500)", angle_col = 45,
+                        treeheight_col = 0,  border_color = NA)
+
+out <- list(scores=summarized_progeny_scores, heat=progeny_hmap)
+
+return(out)
+}
+
+alldata <- runprog(data)
+
+```
+
+#Create identity per celltype and condition and run
+```{r}
+
+data$CTI <- paste(data@meta.data$condition, data@meta.data$integrated_annotation, sep=".")
+
+data <- SetIdent(data, value="CTI")
+
+cti <- runprog(data)
+
+summarized_progeny_scores_df <- cti$scores %>%
+    dplyr::select(-std) %>%
+    spread(Pathway, avg) %>%
+    data.frame(row.names = 1, check.names = FALSE, stringsAsFactors = FALSE)
+paletteLength = 100
+myColor = colorRampPalette(c("Darkblue", "white","red"))(paletteLength)
+
+annotation <- data.frame(condition=sapply(strsplit(row.names(summarized_progeny_scores_df),"\\."), `[`, 1),
+                         row.names = row.names(summarized_progeny_scores_df))
+
+celltype <- sapply(strsplit(row.names(summarized_progeny_scores_df),"\\."), `[`, 2)
+
+progenyBreaks = c(seq(min(summarized_progeny_scores_df), 0,
+                      length.out=ceiling(paletteLength/2) + 1),
+                  seq(max(summarized_progeny_scores_df)/paletteLength,
+                      max(summarized_progeny_scores_df),
+                      length.out=floor(paletteLength/2)))
+
+progeny_hmap = pheatmap(t(summarized_progeny_scores_df[,-1]),fontsize=14,
+                        fontsize_row = 10,
+                        color=myColor, breaks = progenyBreaks,
+                        main = "PROGENy (500)", angle_col = 45,
+                        treeheight_col = 0,  border_color = NA,
+                        annotation_col = annotation, labels_col=celltype, 
+                        cluster_cols = FALSE)
+
+```
+
+
+#Run per condition
+```{r}
+
+data <- SetIdent(data, value="condition")
+
+#Subset data
+am <- subset(data, idents="active_mild")
+am <- SetIdent(am, value="integrated_annotations")
+am.p <- runprog(am)
+
+#Subset data
+as <- subset(data, idents="active_severe")
+as <- SetIdent(as, value="integrated_annotations")
+as.p <- runprog(as)
+
+#Subset data
+h <- subset(data, idents="healthy")
+h <- SetIdent(h, value="integrated_annotations")
+h.p <- runprog(h)
+
+#Subset data
+rm <- subset(data, idents="recovered_mild")
+rm <- SetIdent(rm, value="integrated_annotations")
+rm.p <- runprog(rm)
+
+#Subset data
+rs <- subset(data, idents="recovered_severe")
+rs <- SetIdent(rs, value="integrated_annotations")
+rs.p <- runprog(rs)
+
+```
+
+#Write output
+```{r}
+
+#Write scores
+write.csv(am.p$scores, "progeny/progeny_am_scores.csv")
+write.csv(as.p$scores, "progeny/progeny_as_scores.csv")
+write.csv(h.p$scores, "progeny/progeny_h_scores.csv")
+write.csv(rm.p$scores, "progeny/progeny_rm_scores.csv")
+write.csv(rs.p$scores, "progeny/progeny_rs_scores.csv")
+write.csv(alldata$scores, "progeny/progeny_all_scores.csv")
+
+#Create heatmap names
+all.h <- "progeny/heatmap_allconditions.pdf"
+am.h <- "progeny/heatmap_am.pdf"
+as.h <- "progeny/heatmap_as.pdf"
+h.h <- "progeny/heatmap_h.pdf"
+rm.h <- "progeny/heatmap_rm.pdf"
+rs.h <- "progeny/heatmap_rs.pdf"
+
+#Write heatmap
+pdf(all.h, width=18, height=9)
+print(alldata$heat)
+dev.off()
+
+pdf(am.h, width=18, height=9)
+print(am.p$heat)
+dev.off()
+
+pdf(as.h, width=18, height=9)
+print(as.p$heat)
+dev.off()
+
+pdf(h.h, width=18, height=9)
+print(h.p$heat)
+dev.off()
+
+pdf(rm.h, width=18, height=9)
+print(rm.p$heat)
+dev.off()
+
+pdf(rs.h, width=18, height=9)
+print(rs.p$heat)
+dev.off()
+
+```
+

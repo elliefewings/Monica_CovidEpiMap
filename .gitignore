@@ -1,0 +1,8 @@
+*.rds
+*.xlsx
+annotation/
+cellphoneDB/count.matrix.am.txt
+cellphoneDB/count.matrix.as.txt
+cellphoneDB/count.matrix.h.txt
+cellphoneDB/count.matrix.rm.txt
+cellphoneDB/count.matrix.rs.txt

@@ -1,0 +1,136 @@
+---
+author: "Eleanor Fewings"
+output: html_document
+---
+
+# start_section  
+```{r start_section}
+
+# Time stamp
+Sys.time()
+
+# Clean up
+rm(list=ls())
+
+# Load libraries
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(magrittr)
+library(Seurat)
+library(cowplot)
+library(stringr)
+library(igraph)
+library(ComplexHeatmap)
+library(ggraph)
+library(networkD3)
+
+# Folders
+setwd("~/Saez/CovidEpiMap/")
+
+```
+
+## Load data
+```{r load}
+
+#Load data
+data <- readRDS("integrated.RNA.Tcells.annotated.rds")
+
+#Separate metadata for exploration
+metadata <- data@meta.data
+
+```
+
+#Convert to enseml IDs
+```{r}
+##Not needed
+convertGeneList <- function(x){
+  genes <- rownames(x)
+  require("biomaRt")
+  human <- useMart("ensembl", dataset = "hsapiens_gene_ensembl")
+  eid <- getBM(attributes = c("ensembl_gene_id", "hgnc_symbol"), filters = "hgnc_symbol", values = genes,mart = human)
+  unique <- eid[!duplicated(eid$ensembl_gene_id),]
+  merged <- merge(x, unique, by.x="row.names", by.y="hgnc_symbol", all.y=TRUE)
+  rownames(merged) <- merged$ensembl_gene_id
+  out <- merged %>% subset(select=c(-ensembl_gene_id, -Row.names))
+  return(out)
+}
+
+```
+
+
+#Subset data by condition
+```{r}
+
+table(metadata$condition)
+
+data <- SetIdent(data, value="condition")
+
+#Subset data
+am <- subset(data, idents="active_mild")
+
+#Subset data
+as <- subset(data, idents="active_severe")
+
+#Subset data
+h <- subset(data, idents="healthy")
+
+#Subset data
+rm <- subset(data, idents="recovered_mild")
+
+#Subset data
+rs <- subset(data, idents="recovered_severe")
+
+```
+
+
+#Create format for cellphonedb
+```{r}
+
+#Create metadata and format column order (sample names need to be in their own column or they throw an error)
+#meta <- data@meta.data[, colnames(data@meta.data) %in% c("condition", "integrated_annotations")] %>% subset(select=c(integrated_annotations, condition)) %>% tibble::rownames_to_column("sample")
+
+meta.am <- am@meta.data[, colnames(am@meta.data) %in% c("condition", "integrated_annotations")] %>% subset(select=c(integrated_annotations, condition)) %>% tibble::rownames_to_column("sample")
+
+meta.as <- as@meta.data[, colnames(as@meta.data) %in% c("condition", "integrated_annotations")] %>% subset(select=c(integrated_annotations, condition)) %>% tibble::rownames_to_column("sample")
+
+meta.h <- h@meta.data[, colnames(h@meta.data) %in% c("condition", "integrated_annotations")] %>% subset(select=c(integrated_annotations, condition)) %>% tibble::rownames_to_column("sample")
+
+meta.rm <- rm@meta.data[, colnames(rm@meta.data) %in% c("condition", "integrated_annotations")] %>% subset(select=c(integrated_annotations, condition)) %>% tibble::rownames_to_column("sample")
+
+meta.rs <- rs@meta.data[, colnames(rs@meta.data) %in% c("condition", "integrated_annotations")] %>% subset(select=c(integrated_annotations, condition)) %>% tibble::rownames_to_column("sample")
+
+#Create matrices
+#data.mx <- data@assays$RNA@data %>% as.matrix()
+
+am.mx <- am@assays$RNA@data %>% as.matrix()
+
+as.mx <- as@assays$RNA@data %>% as.matrix()
+
+h.mx <- h@assays$RNA@data %>% as.matrix()
+
+rm.mx <- rm@assays$RNA@data %>% as.matrix()
+
+rs.mx <- rs@assays$RNA@data %>% as.matrix()
+
+#export
+#write.table(data.mx, "cellphoneDB/count.matrix.txt", quote=FALSE, sep="\t")
+#write.table(meta, "cellphoneDB/metadata.txt", quote=FALSE, sep="\t")
+
+write.table(am.mx, "cellphoneDB/count.matrix.am.txt", quote=FALSE, sep="\t")
+write.table(meta.am, "cellphoneDB/metadata.am.txt", quote=FALSE, sep="\t")
+
+write.table(as.mx, "cellphoneDB/count.matrix.as.txt", quote=FALSE, sep="\t")
+write.table(meta.as, "cellphoneDB/metadata.as.txt", quote=FALSE, sep="\t")
+
+write.table(h.mx, "cellphoneDB/count.matrix.h.txt", quote=FALSE, sep="\t")
+write.table(meta.h, "cellphoneDB/metadata.h.txt", quote=FALSE, sep="\t")
+
+write.table(rm.mx, "cellphoneDB/count.matrix.rm.txt", quote=FALSE, sep="\t")
+write.table(meta.rm, "cellphoneDB/metadata.rm.txt", quote=FALSE, sep="\t")
+
+write.table(rs.mx, "cellphoneDB/count.matrix.rs.txt", quote=FALSE, sep="\t")
+write.table(meta.rs, "cellphoneDB/metadata.rs.txt", quote=FALSE, sep="\t")
+
+
+```

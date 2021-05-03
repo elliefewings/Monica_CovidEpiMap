@@ -1,0 +1,168 @@
+---
+author: "Eleanor Fewings"
+output: html_document
+---
+
+# start_section  
+```{r start_section}
+
+# Time stamp
+Sys.time()
+
+# Clean up
+rm(list=ls())
+
+# Load libraries
+library(dplyr)
+library(ggplot2)
+library(magrittr)
+library(tidyr)
+library(pheatmap)
+
+# Folders
+setwd("~/Saez/CovidEpiMap/")
+
+outdir <- "cellphoneDB/out_h"
+
+```
+
+#Load cellphoneDB output
+```{r}
+
+pval <- read.table(paste(outdir, "/pvalues.txt", sep=""), sep="\t", stringsAsFactors = FALSE, header=TRUE, check.names=FALSE)
+means <- read.table(paste(outdir, "/means.txt", sep=""), sep="\t", stringsAsFactors = FALSE, header=TRUE, check.names=FALSE)
+signif <- read.table(paste(outdir, "/significant_means.txt", sep=""), sep="\t", stringsAsFactors = FALSE, header=TRUE, check.names=FALSE)
+
+#Set rownames
+rownames(pval) <- pval$id_cp_interaction
+rownames(means) <- means$id_cp_interaction
+rownames(signif) <- signif$id_cp_interaction
+
+#Add rank value to means file
+signif <- signif %>% select(id_cp_interaction, rank)
+means <- merge(signif, means, by="id_cp_interaction")
+
+
+```
+
+# Select interactions where VSMC or Fibs are the receptor
+```{r}
+
+#Create long format
+longformat <- pval %>% gather(key="Pair", value="pval", 12:ncol(pval)) %>% separate(Pair, c("pair_a", "pair_b"),sep="\\|",remove=FALSE)
+
+#Look at interactions between ligand and receptor only
+shortened <- longformat[(longformat$receptor_a == "True" & longformat$receptor_b == "False") | (longformat$receptor_a == "False" & longformat$receptor_b == "True"),]
+
+#Count number of significant interactions
+shortened <- shortened %>% group_by(Pair) %>% mutate(countint=sum(pval < 0.05))
+
+#Label ligand celltype
+shortened$ligand.cell <- ifelse(shortened$receptor_a == TRUE, shortened$pair_b, shortened$pair_a)
+
+# Label receptor
+shortened$receptor.cell <- ifelse(shortened$receptor_a == TRUE, shortened$pair_a, shortened$pair_b)
+
+#Create matrix from data
+mx <- shortened %>% subset(select=c(ligand.cell, receptor.cell, countint)) %>% unique() %>% mutate(grouped_id = row_number()) %>% spread(receptor.cell, countint) %>% select(-grouped_id)
+
+#Summarise counts
+mx <- mx %>% group_by(ligand.cell) %>% summarise_all(funs(sum), na.rm = TRUE)
+
+lc <- mx$ligand.cell
+
+#Format rownames
+mx <- mx %>% select(-ligand.cell) %>% as.matrix()
+
+row.names(mx) <- lc
+
+
+#Plot heatmap
+
+heat <- pheatmap(t(mx), xlab = "Celltypes with ligand", ylab="Celltypes with receptor")
+
+```
+
+# Look at top significant interactions
+```{r}
+
+#Create same format for means
+longformat.means <- means %>% gather(key="Pair", value="mean", 13:ncol(means)) %>% separate(Pair, c("pair_a", "pair_b"),sep="\\|",remove=FALSE)
+
+#Look at interactions between ligand and receptor only
+shortened.means <- longformat.means[(longformat.means$receptor_a == "True" & longformat.means$receptor_b == "False") | (longformat.means$receptor_a == "False" & longformat.means$receptor_b == "True"),]
+
+#Merge means and pvals
+shortened.means <- shortened.means %>% subset(select=c("id_cp_interaction", "rank", "interacting_pair", "Pair", "mean"))
+
+merged <- merge(shortened, shortened.means, by=c("id_cp_interaction", "interacting_pair", "Pair"))
+
+#Select significant values
+sig <- merged[merged$pval < 0.05,]
+
+#Order group by mean
+sig <- sig[order(sig$ligand.cell, sig$receptor.cell, sig$rank, decreasing = TRUE),]
+
+#Label position in group
+sig$lab <- 1
+sig <- sig %>% group_by(ligand.cell, receptor.cell) %>% mutate(pos=cumsum(lab))
+
+#Select top 5 per group
+sig.short <- sig %>% filter(pos < 6)
+
+#Plot
+ints <- ggplot(sig.short, aes(ligand.cell, interacting_pair, colour=rank)) +
+          geom_point(size=5) +
+          facet_grid(~receptor.cell) +
+          scale_colour_continuous(high = "#132B43", low = "#56B1F7") +
+          theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
+
+```
+
+#Write plots
+```{r}
+
+out.heat <- paste(outdir, "/heatmap_celltypes.pdf", sep="")
+out.ints <- paste(outdir, "/top_ints.pdf", sep="")
+
+#Write heatmap
+pdf(out.heat)
+print(heat)
+dev.off()
+
+#Write ints
+pdf(out.ints, width=18, height=9)
+print(ints)
+dev.off()
+
+```
+
+#Chord diagram
+```{r}
+
+sk.goi <- function(smeans, metadata, goi){  
+  goi <- toupper(goi)
+  
+  smeans.goi <- read.table(smeans, sep="\t", stringsAsFactors = FALSE, header=TRUE, check.names=FALSE)
+  
+  smeans.goi <- smeans.goi[smeans.goi$gene_a == goi | smeans.goi$gene_b == goi,]
+  
+  smeans.goi <- smeans.goi %>% gather(Interaction, Value, 13:ncol(smeans.goi)) %>% filter(!is.na(Value))
+  
+  smeans.goi$Sender <- sapply(strsplit(smeans.goi$Interaction,"\\|"), `[`, 1)
+  smeans.goi$Reciever <- sapply(strsplit(smeans.goi$Interaction,"\\|"), `[`, 2)
+  
+
+  df <- smeans.goi %>% subset(select=c(gene_a, gene_b, Value))
+
+  circos.initialize(factors = df1$country)
+  chordDiagram(df, annotationTrack = c("name", "grid"))
+  circos.clear()
+  return(sankey.goi)
+  
+}
+
+p <- chorddiag(m, groupColors = groupColors, groupnamePadding = 20)
+
+```
+
